@@ -8,11 +8,12 @@ x-influxdb-shared-vars: &influxdb-shared-vars
 services:
     influxdb:
         container_name: $INFLUXDB_CONTAINER
-        image: influxdb:2.7.10
+        image: influxdb:2.7
         volumes:
-            - type: volume
-              source: influxdb-data
+            - type: bind
+              source: ./influxdb-data
               target: /var/lib/influxdb
+              read_only: false
 
             - type: bind
               source: ./influxdb/docker-entrypoint-initdb.d
@@ -35,23 +36,24 @@ services:
 
             << : *influxdb-shared-vars
         networks:
-            - metrics
-        # restart: always
+            - traefik_public
+        restart: unless-stopped
         labels:
             - "traefik.http.routers.influxdb-ssl.entryPoints=influxdb-port"
             - "traefik.http.routers.influxdb-ssl.rule=host(`$METRICS_DOMAIN`)"
             - "traefik.http.routers.influxdb-ssl.tls=true"
-            - "traefik.http.routers.influxdb-ssl.tls.certResolver=lets-encrypt-ssl"
+            - "traefik.http.routers.influxdb-ssl.tls.certResolver=letsencryptresolver"
             - "traefik.http.routers.influxdb-ssl.service=influxdb-ssl"
             - "traefik.http.services.influxdb-ssl.loadBalancer.server.port=$INFLUXDB_PORT"
 
     grafana:
         container_name: grafana
-        image: grafana/grafana:11.3.0
+        image: grafana/grafana:11.4
         volumes:
-            - type: volume
-              source: grafana-data
+            - type: bind
+              source: ./grafana-data
               target: /var/lib/grafana
+              read_only: false
 
             - type: bind
               source: ./grafana/provisioning
@@ -76,66 +78,19 @@ services:
             # Variables for setting up the InfluxDB data source
             << : *influxdb-shared-vars
         networks:
-            - metrics
-        # restart: always
+            - traefik_public
+        restart: unless-stopped
         depends_on:
             - $INFLUXDB_CONTAINER
         labels:
-            # Router for redirecting HTTP traffic to the router receiving HTTPS traffic.
-            - "traefik.http.routers.grafana.entryPoints=port80"
-            - "traefik.http.routers.grafana.rule=host(`$METRICS_DOMAIN`)"
-            - "traefik.http.routers.grafana.middlewares=grafana-redirect"
-            - "traefik.http.middlewares.grafana-redirect.redirectScheme.scheme=https"
-            - "traefik.http.middlewares.grafana-redirect.redirectScheme.permanent=true"
 
-            - "traefik.http.routers.grafana-ssl.entryPoints=port443"
+            - "traefik.http.routers.grafana-ssl.entryPoints=websecure"
             - "traefik.http.routers.grafana-ssl.rule=host(`$METRICS_DOMAIN`)"
             - "traefik.http.routers.grafana-ssl.tls=true"
-            - "traefik.http.routers.grafana-ssl.tls.certResolver=lets-encrypt-ssl"
+            - "traefik.http.routers.grafana-ssl.tls.certResolver=letsencryptresolver"
             - "traefik.http.routers.grafana-ssl.service=grafana-ssl"
             - "traefik.http.services.grafana-ssl.loadBalancer.server.port=3000"
 
-    traefik:
-        container_name: traefik
-        image: traefik:v3.1.6
-        volumes:
-            - type: volume
-              source: traefik-data
-              target: /letsencrypt
-
-            - type: bind
-              source: /var/run/docker.sock
-              target: /var/run/docker.sock
-              read_only: true
-        networks:
-            - metrics
-        # restart: always
-        ports:
-            - "80:80"
-            - "443:443"
-            - "$INFLUXDB_PORT:$INFLUXDB_PORT"
-        command:
-            - "--providers.docker=true"
-
-            - "--entryPoints.port443.address=:443"
-            - "--entryPoints.port80.address=:80"
-            - "--entryPoints.influxdb-port.address=:$INFLUXDB_PORT"
-            
-            - "--certificatesResolvers.lets-encrypt-ssl.acme.tlsChallenge=true"
-            - "--certificatesResolvers.lets-encrypt-ssl.acme.storage=/letsencrypt/acme.json"
-            - "--certificatesresolvers.lets-encrypt-ssl.acme.caServer=${CA_SERVER}"
-            - "--certificatesResolvers.lets-encrypt-ssl.acme.email=${LETS_ENCRYPT_EMAIL}"
-
 networks:
-    metrics:
-        driver: bridge
-
-volumes:
-    influxdb-data:
-        external: false
-
-    grafana-data:
-        external: false
-
-    traefik-data:
-        external: false
+    traefik_public:
+        name: traefik_public
